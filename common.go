@@ -25,6 +25,8 @@ func (m *MulticastAddr) InitMCast() {
 	}
 }
 
+const ErrNoInt = "no interface"
+
 //Discover returns the interface name with the capabilite.
 func Discover(flag net.Flags) (string, error) {
 	ints, err := net.Interfaces()
@@ -43,7 +45,7 @@ func Discover(flag net.Flags) (string, error) {
 			return in.Name, nil
 		}
 	}
-	return "", e.New("no interface")
+	return "", e.New(ErrNoInt)
 }
 
 func getInterface(in net.Interface) ([]net.Addr, string) {

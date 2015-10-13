@@ -16,7 +16,10 @@ import (
 
 func TestServerMultiCast(t *testing.T) {
 	in, err := Discover(net.FlagMulticast)
-	if err != nil {
+	if e.Equal(err, ErrNoInt) {
+		t.Log("No multicast capable interface, may be this is travis.cl. Skip the test.")
+		return
+	} else if err != nil {
 		t.Fatal(e.Trace(e.Forward(err)))
 	}
 
@@ -220,7 +223,10 @@ func TestServerIpv4bc(t *testing.T) {
 
 func TestServerIpv4mc(t *testing.T) {
 	in, err := Discover(net.FlagMulticast)
-	if err != nil {
+	if e.Equal(err, ErrNoInt) {
+		t.Log("No multicast capable interface, may be this is travis.cl. Skip the test.")
+		return
+	} else if err != nil {
 		t.Fatal(e.Trace(e.Forward(err)))
 	}
 
@@ -330,14 +336,7 @@ func TestServerProtocolFail(t *testing.T) {
 
 // Example demonstrate discovery in work.
 func Example() {
-	in, err := Discover(net.FlagMulticast)
-	if err != nil {
-		fmt.Println(err)
-	}
-
 	server := &Server{}
-	server.Interface = in
-	server.AddrVer = Ipv4
 	server.Protocol = func(addr *net.UDPAddr, recv []byte) (msg []byte, err error) {
 		if string(recv) != "request" {
 			return nil, errors.New("protocol error")
@@ -351,8 +350,6 @@ func Example() {
 	defer server.Close()
 
 	client := &Client{}
-	client.Interface = in
-	client.AddrVer = Ipv4
 	client.Request = func(dst *net.UDPAddr) ([]byte, error) {
 		return []byte("request"), nil
 	}
