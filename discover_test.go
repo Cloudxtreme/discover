@@ -343,7 +343,7 @@ func Example() {
 		}
 		return []byte("msg"), nil
 	}
-	err = server.Do()
+	err := server.Do()
 	if err != nil {
 		fmt.Println(err)
 	}
