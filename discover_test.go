@@ -6,7 +6,7 @@ package discover
 
 import (
 	"errors"
-	"log"
+	"fmt"
 	"net"
 	"testing"
 	"time"
@@ -332,7 +332,7 @@ func TestServerProtocolFail(t *testing.T) {
 func Example() {
 	in, err := Discover(net.FlagMulticast)
 	if err != nil {
-		log.Fatal(err)
+		fmt.Println(err)
 	}
 
 	server := &Server{}
@@ -346,7 +346,7 @@ func Example() {
 	}
 	err = server.Do()
 	if err != nil {
-		log.Fatal(err)
+		fmt.Println(err)
 	}
 	defer server.Close()
 
@@ -358,9 +358,9 @@ func Example() {
 	}
 	buf, err := client.Discover()
 	if err != nil {
-		log.Fatal(err)
+		fmt.Println(err)
 	}
-	log.Println(string(buf))
+	fmt.Println(string(buf))
 	//Output:
 	//msg
 }
