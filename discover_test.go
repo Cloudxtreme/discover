@@ -328,7 +328,7 @@ func TestServerProtocolFail(t *testing.T) {
 	}
 }
 
-func Exemple() {
+func Exemple_discover() {
 	in, err := Discover(net.FlagMulticast)
 	if err != nil {
 		log.Fatal(err)
