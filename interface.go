@@ -41,6 +41,7 @@ func (i *Intface) getInt() error {
 				if intName == "" {
 					continue
 				}
+				i.Interface = intName
 				i.iface = &in
 				break
 			}

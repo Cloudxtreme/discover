@@ -25,6 +25,7 @@ func TestServerMultiCast(t *testing.T) {
 
 	server := &Server{}
 	server.Interface = in
+	server.Port = "3333"
 	server.Protocol = func(addr *net.UDPAddr, recv []byte) (msg []byte, err error) {
 		if string(recv) != "request" {
 			return nil, e.New("protocol error")
@@ -39,6 +40,7 @@ func TestServerMultiCast(t *testing.T) {
 
 	client := &Client{}
 	client.Interface = in
+	client.Port = server.Port
 	client.Request = func(dst *net.UDPAddr) ([]byte, error) {
 		return []byte("request"), nil
 	}
@@ -73,6 +75,7 @@ func TestServerLocalhost(t *testing.T) {
 
 	client := &Client{}
 	client.Interface = in
+	client.Port = server.Port
 	client.Request = func(dst *net.UDPAddr) ([]byte, error) {
 		return []byte("request"), nil
 	}
@@ -109,6 +112,7 @@ func TestServerBroadcast(t *testing.T) {
 	client := &Client{}
 	client.Interface = in
 	client.NotMulticast = true
+	client.Port = server.Port
 	client.Request = func(dst *net.UDPAddr) ([]byte, error) {
 		return []byte("request"), nil
 	}
@@ -137,6 +141,7 @@ func TestServerAny(t *testing.T) {
 	defer server.Close()
 
 	client := &Client{}
+	client.Port = server.Port
 	client.Request = func(dst *net.UDPAddr) ([]byte, error) {
 		return []byte("request"), nil
 	}
@@ -173,6 +178,7 @@ func TestServerIpv4lo(t *testing.T) {
 	client := &Client{}
 	client.Interface = in
 	client.AddrVer = Ipv4
+	client.Port = server.Port
 	client.Request = func(dst *net.UDPAddr) ([]byte, error) {
 		return []byte("request"), nil
 	}
@@ -209,6 +215,7 @@ func TestServerIpv4bc(t *testing.T) {
 	client := &Client{}
 	client.Interface = in
 	client.AddrVer = Ipv4
+	client.Port = server.Port
 	client.Request = func(dst *net.UDPAddr) ([]byte, error) {
 		return []byte("request"), nil
 	}
@@ -248,6 +255,7 @@ func TestServerIpv4mc(t *testing.T) {
 	client := &Client{}
 	client.Interface = in
 	client.AddrVer = Ipv4
+	client.Port = server.Port
 	client.Request = func(dst *net.UDPAddr) ([]byte, error) {
 		return []byte("request"), nil
 	}
@@ -280,6 +288,7 @@ func TestClientFail(t *testing.T) {
 	client := &Client{}
 	client.Interface = ":)"
 	client.AddrVer = Any
+	client.Port = "6464"
 	client.Request = func(dst *net.UDPAddr) ([]byte, error) {
 		return []byte("request"), nil
 	}
@@ -290,6 +299,7 @@ func TestClientFail(t *testing.T) {
 
 	client = &Client{}
 	client.AddrVer = Any
+	client.Port = "6465"
 	client.Timeout = 1 * time.Second
 	client.Deadline = 100 * time.Millisecond
 	client.Request = func(dst *net.UDPAddr) ([]byte, error) {
@@ -325,6 +335,7 @@ func TestServerProtocolFail(t *testing.T) {
 	client := &Client{}
 	client.Interface = in
 	client.AddrVer = Ipv4
+	client.Port = server.Port
 	client.Request = func(dst *net.UDPAddr) ([]byte, error) {
 		return []byte("blá"), nil
 	}
@@ -350,6 +361,7 @@ func Example() {
 	defer server.Close()
 
 	client := &Client{}
+	client.Port = server.Port
 	client.Request = func(dst *net.UDPAddr) ([]byte, error) {
 		return []byte("request"), nil
 	}

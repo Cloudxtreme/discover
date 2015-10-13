@@ -31,7 +31,7 @@ type Server struct {
 // Protocol function.
 func (a *Server) Do() error {
 	if a.Port == "" {
-		a.Port = "3456"
+		a.Port = "0"
 	}
 	if a.BufSize <= 0 {
 		a.BufSize = 512
@@ -97,6 +97,15 @@ func (a *Server) Close() error {
 	return nil
 }
 
+func (s *Server) ipver(addr net.Addr) {
+	a := addr.String()
+	if utilNet.IsValidIpv6(a) {
+		s.AddrVer = Ipv6
+	} else if utilNet.IsValidIpv4(a) {
+		s.AddrVer = Ipv4
+	}
+}
+
 func (a *Server) bind() (conn *net.UDPConn, err error) {
 	if !a.NotMulticast && a.iface.Flags&net.FlagMulticast == net.FlagMulticast {
 		gaddr, err := a.groupAddr()
@@ -116,6 +125,11 @@ func (a *Server) bind() (conn *net.UDPConn, err error) {
 		if err != nil {
 			return nil, e.New(err)
 		}
+	}
+	a.ipver(conn.LocalAddr())
+	_, a.Port, err = utilNet.SplitHostPort(conn.LocalAddr().String())
+	if err != nil {
+		return nil, e.Forward(err)
 	}
 	return
 }
