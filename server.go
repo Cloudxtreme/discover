@@ -10,7 +10,7 @@ import (
 	"strings"
 
 	"github.com/fcavani/e"
-	utilNet "github.com/fcavani/util/net"
+	utilNet "github.com/fcavani/net"
 )
 
 // Server wait for a client and send some data to it.

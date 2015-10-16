@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/fcavani/e"
-	utilNet "github.com/fcavani/util/net"
+	utilNet "github.com/fcavani/net"
 )
 
 // Client struct provide methods for discover a server in a multicast or broadcast network.

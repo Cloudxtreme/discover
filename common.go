@@ -8,7 +8,7 @@ import (
 	"net"
 
 	"github.com/fcavani/e"
-	utilNet "github.com/fcavani/util/net"
+	utilNet "github.com/fcavani/net"
 )
 
 type MulticastAddr struct {
