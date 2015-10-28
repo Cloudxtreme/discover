@@ -89,3 +89,21 @@ func (a AddrVer) Proto() string {
 	}
 	panic("not here")
 }
+
+// Request is sent by the client and contains the client
+// ip and a payload.
+type Request struct {
+	Ip   string
+	Data []byte
+}
+
+// Response is sent by the server to the client with
+// a id, a sequence number, incoming order of the client, the ip address of the server
+// and a payload.
+type Response struct {
+	Id   string
+	Seq  uint16
+	Ip   string
+	Data []byte
+	Err  error
+}

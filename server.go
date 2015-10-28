@@ -5,12 +5,15 @@
 package discover
 
 import (
-	"log"
+	"bytes"
+	"encoding/gob"
 	"net"
 	"strings"
 
 	"github.com/fcavani/e"
+	"github.com/fcavani/log"
 	utilNet "github.com/fcavani/net"
+	"github.com/fcavani/rand"
 )
 
 // Server wait for a client and send some data to it.
@@ -23,8 +26,30 @@ type Server struct {
 	// BufSize is the buffer size am must be equal to the client.
 	BufSize int
 	// Protocol function receive data from client and return something to this client.
-	Protocol func(addr *net.UDPAddr, recv []byte) (msg []byte, err error)
+	Protocol func(addr *net.UDPAddr, req *Request) (resp *Response, err error)
 	conn     *net.UDPConn
+	seq      []*net.UDPAddr
+}
+
+func (a *Server) sendErr(addr *net.UDPAddr, er error) {
+	respBuf := bytes.NewBuffer([]byte{})
+	enc := gob.NewEncoder(respBuf)
+	resp := &Response{
+		Err: er,
+	}
+	err := enc.Encode(resp)
+	if err != nil {
+		log.Error("Error encoding erro response:", err)
+		return
+	}
+	if respBuf.Len() > a.BufSize {
+		log.Error("Error encoding erro response: error response is too long")
+		return
+	}
+	_, _, err = a.conn.WriteMsgUDP(respBuf.Bytes(), nil, addr)
+	if err != nil {
+		log.Error("Error sending erro response:", err)
+	}
 }
 
 // Do method starts a goroutine that waites for the clients, and make responses with the
@@ -36,6 +61,7 @@ func (a *Server) Do() error {
 	if a.BufSize <= 0 {
 		a.BufSize = 512
 	}
+	a.seq = make([]*net.UDPAddr, 0)
 	a.InitMCast()
 	err := a.getInt()
 	if err != nil {
@@ -55,20 +81,45 @@ func (a *Server) Do() error {
 				log.Printf("Server - ReadFromUDP (%v) failed: %v", addr, e.Trace(e.New(err)))
 				continue
 			}
-			msg, err := a.Protocol(addr, buf[:n])
+			a.seq = append(a.seq, addr)
+			dec := gob.NewDecoder(bytes.NewReader(buf[:n]))
+			var req Request
+			err = dec.Decode(&req)
 			if err != nil {
 				log.Printf("Server - Protocol fail for %v with error: %v", addr, e.Trace(e.New(err)))
-				_, _, err := a.conn.WriteMsgUDP([]byte("protocol fail"), nil, addr)
-				if e.Contains(err, "use of closed network connection") {
-					return
-				}
+				a.sendErr(addr, e.Push(err, e.New("error decoding request")))
 				continue
 			}
-			if len(msg) > a.BufSize {
-				log.Printf("Server - Protocol fail for %v message is too big (%v).", addr, len(msg))
+			resp, err := a.Protocol(addr, &req)
+			if err != nil {
+				log.Printf("Server - Protocol fail for %v with error: %v", addr, e.Trace(e.New(err)))
+				a.sendErr(addr, e.Push(err, e.New("protocol error")))
 				continue
 			}
-			n, oob, err := a.conn.WriteMsgUDP(msg, nil, addr)
+
+			resp.Id, err = rand.Uuid()
+			if err != nil {
+				log.Printf("Server - Protocol fail for %v with error: %v", addr, e.Trace(e.New(err)))
+				a.sendErr(addr, e.Push(err, e.New("protocol error")))
+				continue
+			}
+			resp.Seq = uint16(len(a.seq) - 1)
+			resp.Ip = addr.String()
+
+			respBuf := bytes.NewBuffer([]byte{})
+			enc := gob.NewEncoder(respBuf)
+			err = enc.Encode(resp)
+			if err != nil {
+				log.Printf("Server - Protocol fail for %v with error: %v", addr, e.Trace(e.New(err)))
+				a.sendErr(addr, e.Push(err, e.New("error enconding response")))
+				continue
+			}
+			if respBuf.Len() > a.BufSize {
+				log.Printf("Server - Protocol fail for %v message is too big (%v).", addr, respBuf.Len())
+				a.sendErr(addr, e.Push(err, e.New("response is too long")))
+				continue
+			}
+			n, oob, err := a.conn.WriteMsgUDP(respBuf.Bytes(), nil, addr)
 			if e.Contains(err, "use of closed network connection") {
 				return
 			} else if err != nil {
@@ -79,7 +130,7 @@ func (a *Server) Do() error {
 				log.Printf("Server - WriteMsgUDP to %v failed: %v, %v", addr, n, oob)
 				continue
 			}
-			if n != len(msg) {
+			if n != respBuf.Len() {
 				log.Printf("Server - WriteMsgUDP to %v failed: %v, %v", addr, n, oob)
 				continue
 			}

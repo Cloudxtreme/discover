@@ -5,7 +5,6 @@
 package discover
 
 import (
-	"errors"
 	"fmt"
 	"net"
 	"testing"
@@ -26,11 +25,14 @@ func TestServerMultiCast(t *testing.T) {
 	server := &Server{}
 	server.Interface = in
 	server.Port = "3333"
-	server.Protocol = func(addr *net.UDPAddr, recv []byte) (msg []byte, err error) {
-		if string(recv) != "request" {
+	server.Protocol = func(addr *net.UDPAddr, req *Request) (resp *Response, err error) {
+		if string(req.Data) != "request" {
 			return nil, e.New("protocol error")
 		}
-		return []byte("msg"), nil
+		t.Log(req)
+		return &Response{
+			Data: []byte("msg"),
+		}, nil
 	}
 	err = server.Do()
 	if err != nil {
@@ -41,16 +43,19 @@ func TestServerMultiCast(t *testing.T) {
 	client := &Client{}
 	client.Interface = in
 	client.Port = server.Port
-	client.Request = func(dst *net.UDPAddr) ([]byte, error) {
-		return []byte("request"), nil
+	client.Request = func(dst *net.UDPAddr) (*Request, error) {
+		return &Request{
+			Data: []byte("request"),
+		}, nil
 	}
-	buf, err := client.Discover()
+	resp, err := client.Discover()
 	if err != nil {
 		t.Fatal(e.Trace(e.Forward(err)))
 	}
-	if string(buf) != "msg" {
-		t.Fatal("received wrong message", string(buf))
+	if string(resp.Data) != "msg" {
+		t.Fatal("received wrong message", string(resp.Data))
 	}
+	t.Log(resp)
 }
 
 func TestServerLocalhost(t *testing.T) {
@@ -61,11 +66,14 @@ func TestServerLocalhost(t *testing.T) {
 
 	server := &Server{}
 	server.Interface = in
-	server.Protocol = func(addr *net.UDPAddr, recv []byte) (msg []byte, err error) {
-		if string(recv) != "request" {
+	server.Protocol = func(addr *net.UDPAddr, req *Request) (resp *Response, err error) {
+		if string(req.Data) != "request" {
 			return nil, e.New("protocol error")
 		}
-		return []byte("msg"), nil
+		t.Log(req)
+		return &Response{
+			Data: []byte("msg"),
+		}, nil
 	}
 	err = server.Do()
 	if err != nil {
@@ -76,16 +84,19 @@ func TestServerLocalhost(t *testing.T) {
 	client := &Client{}
 	client.Interface = in
 	client.Port = server.Port
-	client.Request = func(dst *net.UDPAddr) ([]byte, error) {
-		return []byte("request"), nil
+	client.Request = func(dst *net.UDPAddr) (*Request, error) {
+		return &Request{
+			Data: []byte("request"),
+		}, nil
 	}
-	buf, err := client.Discover()
+	resp, err := client.Discover()
 	if err != nil {
 		t.Fatal(e.Trace(e.Forward(err)))
 	}
-	if string(buf) != "msg" {
-		t.Fatal("received wrong message")
+	if string(resp.Data) != "msg" {
+		t.Fatal("received wrong message", string(resp.Data))
 	}
+	t.Log(resp)
 }
 
 func TestServerBroadcast(t *testing.T) {
@@ -97,11 +108,14 @@ func TestServerBroadcast(t *testing.T) {
 	server := &Server{}
 	server.Interface = in
 	server.NotMulticast = true
-	server.Protocol = func(addr *net.UDPAddr, recv []byte) (msg []byte, err error) {
-		if string(recv) != "request" {
+	server.Protocol = func(addr *net.UDPAddr, req *Request) (resp *Response, err error) {
+		if string(req.Data) != "request" {
 			return nil, e.New("protocol error")
 		}
-		return []byte("msg"), nil
+		t.Log(req)
+		return &Response{
+			Data: []byte("msg"),
+		}, nil
 	}
 	err = server.Do()
 	if err != nil {
@@ -113,26 +127,32 @@ func TestServerBroadcast(t *testing.T) {
 	client.Interface = in
 	client.NotMulticast = true
 	client.Port = server.Port
-	client.Request = func(dst *net.UDPAddr) ([]byte, error) {
-		return []byte("request"), nil
+	client.Request = func(dst *net.UDPAddr) (*Request, error) {
+		return &Request{
+			Data: []byte("request"),
+		}, nil
 	}
-	buf, err := client.Discover()
+	resp, err := client.Discover()
 	if err != nil {
 		t.Fatal(e.Trace(e.Forward(err)))
 	}
-	if string(buf) != "msg" {
-		t.Fatal("received wrong message")
+	if string(resp.Data) != "msg" {
+		t.Fatal("received wrong message", string(resp.Data))
 	}
+	t.Log(resp)
 }
 
 func TestServerAny(t *testing.T) {
 	time.Sleep(2 * time.Second)
 	server := &Server{}
-	server.Protocol = func(addr *net.UDPAddr, recv []byte) (msg []byte, err error) {
-		if string(recv) != "request" {
+	server.Protocol = func(addr *net.UDPAddr, req *Request) (resp *Response, err error) {
+		if string(req.Data) != "request" {
 			return nil, e.New("protocol error")
 		}
-		return []byte("msg"), nil
+		t.Log(req)
+		return &Response{
+			Data: []byte("msg"),
+		}, nil
 	}
 	err := server.Do()
 	if err != nil {
@@ -142,16 +162,19 @@ func TestServerAny(t *testing.T) {
 
 	client := &Client{}
 	client.Port = server.Port
-	client.Request = func(dst *net.UDPAddr) ([]byte, error) {
-		return []byte("request"), nil
+	client.Request = func(dst *net.UDPAddr) (*Request, error) {
+		return &Request{
+			Data: []byte("request"),
+		}, nil
 	}
-	buf, err := client.Discover()
+	resp, err := client.Discover()
 	if err != nil {
 		t.Fatal(e.Trace(e.Forward(err)))
 	}
-	if string(buf) != "msg" {
-		t.Fatal("received wrong message", string(buf))
+	if string(resp.Data) != "msg" {
+		t.Fatal("received wrong message", string(resp.Data))
 	}
+	t.Log(resp)
 }
 
 func TestServerIpv4lo(t *testing.T) {
@@ -163,11 +186,14 @@ func TestServerIpv4lo(t *testing.T) {
 	server := &Server{}
 	server.Interface = in
 	server.AddrVer = Ipv4
-	server.Protocol = func(addr *net.UDPAddr, recv []byte) (msg []byte, err error) {
-		if string(recv) != "request" {
+	server.Protocol = func(addr *net.UDPAddr, req *Request) (resp *Response, err error) {
+		if string(req.Data) != "request" {
 			return nil, e.New("protocol error")
 		}
-		return []byte("msg"), nil
+		t.Log(req)
+		return &Response{
+			Data: []byte("msg"),
+		}, nil
 	}
 	err = server.Do()
 	if err != nil {
@@ -179,16 +205,19 @@ func TestServerIpv4lo(t *testing.T) {
 	client.Interface = in
 	client.AddrVer = Ipv4
 	client.Port = server.Port
-	client.Request = func(dst *net.UDPAddr) ([]byte, error) {
-		return []byte("request"), nil
+	client.Request = func(dst *net.UDPAddr) (*Request, error) {
+		return &Request{
+			Data: []byte("request"),
+		}, nil
 	}
-	buf, err := client.Discover()
+	resp, err := client.Discover()
 	if err != nil {
 		t.Fatal(e.Trace(e.Forward(err)))
 	}
-	if string(buf) != "msg" {
-		t.Fatal("received wrong message")
+	if string(resp.Data) != "msg" {
+		t.Fatal("received wrong message", string(resp.Data))
 	}
+	t.Log(resp)
 }
 
 func TestServerIpv4bc(t *testing.T) {
@@ -200,11 +229,14 @@ func TestServerIpv4bc(t *testing.T) {
 	server := &Server{}
 	server.Interface = in
 	server.AddrVer = Ipv4
-	server.Protocol = func(addr *net.UDPAddr, recv []byte) (msg []byte, err error) {
-		if string(recv) != "request" {
+	server.Protocol = func(addr *net.UDPAddr, req *Request) (resp *Response, err error) {
+		if string(req.Data) != "request" {
 			return nil, e.New("protocol error")
 		}
-		return []byte("msg"), nil
+		t.Log(req)
+		return &Response{
+			Data: []byte("msg"),
+		}, nil
 	}
 	err = server.Do()
 	if err != nil {
@@ -216,16 +248,19 @@ func TestServerIpv4bc(t *testing.T) {
 	client.Interface = in
 	client.AddrVer = Ipv4
 	client.Port = server.Port
-	client.Request = func(dst *net.UDPAddr) ([]byte, error) {
-		return []byte("request"), nil
+	client.Request = func(dst *net.UDPAddr) (*Request, error) {
+		return &Request{
+			Data: []byte("request"),
+		}, nil
 	}
-	buf, err := client.Discover()
+	resp, err := client.Discover()
 	if err != nil {
 		t.Fatal(e.Trace(e.Forward(err)))
 	}
-	if string(buf) != "msg" {
-		t.Fatal("received wrong message", string(buf))
+	if string(resp.Data) != "msg" {
+		t.Fatal("received wrong message", string(resp.Data))
 	}
+	t.Log(resp)
 }
 
 func TestServerIpv4mc(t *testing.T) {
@@ -240,11 +275,14 @@ func TestServerIpv4mc(t *testing.T) {
 	server := &Server{}
 	server.Interface = in
 	server.AddrVer = Ipv4
-	server.Protocol = func(addr *net.UDPAddr, recv []byte) (msg []byte, err error) {
-		if string(recv) != "request" {
+	server.Protocol = func(addr *net.UDPAddr, req *Request) (resp *Response, err error) {
+		if string(req.Data) != "request" {
 			return nil, e.New("protocol error")
 		}
-		return []byte("msg"), nil
+		t.Log(req)
+		return &Response{
+			Data: []byte("msg"),
+		}, nil
 	}
 	err = server.Do()
 	if err != nil {
@@ -256,27 +294,33 @@ func TestServerIpv4mc(t *testing.T) {
 	client.Interface = in
 	client.AddrVer = Ipv4
 	client.Port = server.Port
-	client.Request = func(dst *net.UDPAddr) ([]byte, error) {
-		return []byte("request"), nil
+	client.Request = func(dst *net.UDPAddr) (*Request, error) {
+		return &Request{
+			Data: []byte("request"),
+		}, nil
 	}
-	buf, err := client.Discover()
+	resp, err := client.Discover()
 	if err != nil {
 		t.Fatal(e.Trace(e.Forward(err)))
 	}
-	if string(buf) != "msg" {
-		t.Fatal("received wrong message")
+	if string(resp.Data) != "msg" {
+		t.Fatal("received wrong message", string(resp.Data))
 	}
+	t.Log(resp)
 }
 
 func TestServerFail(t *testing.T) {
 	server := &Server{}
 	server.Interface = ":)"
 	server.AddrVer = Any
-	server.Protocol = func(addr *net.UDPAddr, recv []byte) (msg []byte, err error) {
-		if string(recv) != "request" {
+	server.Protocol = func(addr *net.UDPAddr, req *Request) (resp *Response, err error) {
+		if string(req.Data) != "request" {
 			return nil, e.New("protocol error")
 		}
-		return []byte("msg"), nil
+		t.Log(req)
+		return &Response{
+			Data: []byte("msg"),
+		}, nil
 	}
 	err := server.Do()
 	if err != nil && !e.Equal(err, "none interface with this name") {
@@ -289,8 +333,10 @@ func TestClientFail(t *testing.T) {
 	client.Interface = ":)"
 	client.AddrVer = Any
 	client.Port = "6464"
-	client.Request = func(dst *net.UDPAddr) ([]byte, error) {
-		return []byte("request"), nil
+	client.Request = func(dst *net.UDPAddr) (*Request, error) {
+		return &Request{
+			Data: []byte("request"),
+		}, nil
 	}
 	_, err := client.Discover()
 	if err != nil && !e.Equal(err, "none interface with this name") {
@@ -302,8 +348,10 @@ func TestClientFail(t *testing.T) {
 	client.Port = "6465"
 	client.Timeout = 1 * time.Second
 	client.Deadline = 100 * time.Millisecond
-	client.Request = func(dst *net.UDPAddr) ([]byte, error) {
-		return []byte("request"), nil
+	client.Request = func(dst *net.UDPAddr) (*Request, error) {
+		return &Request{
+			Data: []byte("request"),
+		}, nil
 	}
 	_, err = client.Discover()
 	if err != nil && !e.Equal(err, "no addresses capable for listen udp") {
@@ -320,11 +368,14 @@ func TestServerProtocolFail(t *testing.T) {
 	server := &Server{}
 	server.Interface = in
 	server.AddrVer = Ipv4
-	server.Protocol = func(addr *net.UDPAddr, recv []byte) (msg []byte, err error) {
-		if string(recv) != "request" {
+	server.Protocol = func(addr *net.UDPAddr, req *Request) (resp *Response, err error) {
+		if string(req.Data) != "request" {
 			return nil, e.New("protocol error")
 		}
-		return []byte("msg"), nil
+		t.Log(req)
+		return &Response{
+			Data: []byte("msg"),
+		}, nil
 	}
 	err = server.Do()
 	if err != nil {
@@ -336,8 +387,10 @@ func TestServerProtocolFail(t *testing.T) {
 	client.Interface = in
 	client.AddrVer = Ipv4
 	client.Port = server.Port
-	client.Request = func(dst *net.UDPAddr) ([]byte, error) {
-		return []byte("blá"), nil
+	client.Request = func(dst *net.UDPAddr) (*Request, error) {
+		return &Request{
+			Data: []byte("request"),
+		}, nil
 	}
 	_, err = client.Discover()
 	if err != nil && e.Find(err, "protocol fail") < 0 {
@@ -348,11 +401,13 @@ func TestServerProtocolFail(t *testing.T) {
 // Example demonstrate discovery in work.
 func Example() {
 	server := &Server{}
-	server.Protocol = func(addr *net.UDPAddr, recv []byte) (msg []byte, err error) {
-		if string(recv) != "request" {
-			return nil, errors.New("protocol error")
+	server.Protocol = func(addr *net.UDPAddr, req *Request) (resp *Response, err error) {
+		if string(req.Data) != "request" {
+			return nil, e.New("protocol error")
 		}
-		return []byte("msg"), nil
+		return &Response{
+			Data: []byte("msg"),
+		}, nil
 	}
 	err := server.Do()
 	if err != nil {
@@ -362,14 +417,16 @@ func Example() {
 
 	client := &Client{}
 	client.Port = server.Port
-	client.Request = func(dst *net.UDPAddr) ([]byte, error) {
-		return []byte("request"), nil
+	client.Request = func(dst *net.UDPAddr) (*Request, error) {
+		return &Request{
+			Data: []byte("request"),
+		}, nil
 	}
-	buf, err := client.Discover()
+	resp, err := client.Discover()
 	if err != nil {
 		fmt.Println(err)
 	}
-	fmt.Println(string(buf))
+	fmt.Println(string(resp.Data))
 	//Output:
 	//msg
 }

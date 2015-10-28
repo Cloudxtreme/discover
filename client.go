@@ -6,6 +6,7 @@ package discover
 
 import (
 	"bytes"
+	"encoding/gob"
 	"net"
 	"strconv"
 	"strings"
@@ -29,11 +30,11 @@ type Client struct {
 	// Deadline is the udp io deadline
 	Deadline time.Duration
 	// Request function returns the data that will be send to the server.
-	Request func(dst *net.UDPAddr) ([]byte, error)
+	Request func(dst *net.UDPAddr) (*Request, error)
 }
 
 // Discover funtion discovers the server and returns the data sent by the server.
-func (c *Client) Discover() ([]byte, error) {
+func (c *Client) Discover() (*Response, error) {
 	if c.Port == "" {
 		c.Port = "3456"
 	}
@@ -51,14 +52,14 @@ func (c *Client) Discover() ([]byte, error) {
 	if err != nil {
 		return nil, e.Forward(err)
 	}
-	buf, err := c.getAddr()
+	resp, err := c.getAddr()
 	if err != nil {
 		return nil, e.Forward(err)
 	}
-	return buf, nil
+	return resp, nil
 }
 
-func (c *Client) getAddr() ([]byte, error) {
+func (c *Client) getAddr() (*Response, error) {
 	addrs, err := c.iface.Addrs()
 	if err != nil {
 		return nil, e.New(err)
@@ -73,17 +74,17 @@ func (c *Client) getAddr() ([]byte, error) {
 		if !c.AddrAllowed(a) {
 			continue
 		}
-		buf, err := c.client(a)
+		resp, err := c.client(a)
 		if err != nil {
 			er = e.Push(er, err)
 			continue
 		}
-		return buf, nil
+		return resp, nil
 	}
 	return nil, e.Push(er, e.New("no addresses capable for listen udp"))
 }
 
-func (c *Client) client(addr string) ([]byte, error) {
+func (c *Client) client(addr string) (*Response, error) {
 	ip, err := ipport(c.Interface, addr, "0")
 	if err != nil {
 		return nil, e.New(err)
@@ -128,14 +129,21 @@ func (c *Client) client(addr string) ([]byte, error) {
 		if err != nil {
 			return nil, e.Forward(err)
 		}
-		if len(req) > c.BufSize {
+		req.Ip = conn.LocalAddr().String()
+		reqBuf := bytes.NewBuffer([]byte{})
+		enc := gob.NewEncoder(reqBuf)
+		err = enc.Encode(req)
+		if err != nil {
+			return nil, e.Push(err, e.New("error encoding request"))
+		}
+		if reqBuf.Len() > c.BufSize {
 			return nil, e.New("request is too big")
 		}
 		err = conn.SetDeadline(time.Now().Add(c.Deadline))
 		if err != nil {
 			return nil, e.New(err)
 		}
-		_, _, err = conn.WriteMsgUDP(req, nil, dst)
+		_, _, err = conn.WriteMsgUDP(reqBuf.Bytes(), nil, dst)
 		if e.Contains(err, "i/o timeout") {
 			continue
 		} else if err != nil {
@@ -151,10 +159,16 @@ func (c *Client) client(addr string) ([]byte, error) {
 		} else if err != nil {
 			return nil, e.New(err)
 		}
-		if bytes.Equal(buf[:n], []byte("protocol fail")) {
-			return nil, e.New("protocol fail")
+		dec := gob.NewDecoder(bytes.NewReader(buf[:n]))
+		var resp Response
+		err = dec.Decode(&resp)
+		if err != nil {
+			return nil, e.Push(err, e.New("error decoding response"))
 		}
-		return buf[:n], nil
+		if resp.Err != nil {
+			return nil, e.Forward(resp.Err)
+		}
+		return &resp, nil
 	}
 	return nil, e.New("can't find the server")
 }
@@ -210,5 +224,4 @@ func (c *Client) multicast(addr net.Addr) (*net.UDPAddr, error) {
 	} else {
 		return nil, e.New("invalid ip address")
 	}
-	panic("not here")
 }
