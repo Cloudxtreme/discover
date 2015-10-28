@@ -43,7 +43,7 @@ func (a *Server) sendErr(addr *net.UDPAddr, er error) {
 		return
 	}
 	if respBuf.Len() > a.BufSize {
-		log.Error("Error encoding erro response: error response is too long")
+		log.Error("Error encoding erro response: error response is too long", respBuf.Len())
 		return
 	}
 	_, _, err = a.conn.WriteMsgUDP(respBuf.Bytes(), nil, addr)
@@ -116,7 +116,7 @@ func (a *Server) Do() error {
 			}
 			if respBuf.Len() > a.BufSize {
 				log.Printf("Server - Protocol fail for %v message is too big (%v).", addr, respBuf.Len())
-				a.sendErr(addr, e.Push(err, e.New("response is too long")))
+				a.sendErr(addr, e.Push(err, e.New("response is too long %v", respBuf.Len())))
 				continue
 			}
 			n, oob, err := a.conn.WriteMsgUDP(respBuf.Bytes(), nil, addr)

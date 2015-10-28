@@ -137,7 +137,7 @@ func (c *Client) client(addr string) (*Response, error) {
 			return nil, e.Push(err, e.New("error encoding request"))
 		}
 		if reqBuf.Len() > c.BufSize {
-			return nil, e.New("request is too big")
+			return nil, e.New("request is too big %v", reqBuf.Len())
 		}
 		err = conn.SetDeadline(time.Now().Add(c.Deadline))
 		if err != nil {
