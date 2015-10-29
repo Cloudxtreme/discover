@@ -94,6 +94,7 @@ func (a AddrVer) Proto() string {
 // ip and a payload.
 type Request struct {
 	Ip   string
+	Id   string
 	Data []byte
 }
 

@@ -398,6 +398,64 @@ func TestServerProtocolFail(t *testing.T) {
 	}
 }
 
+func TestClientAgain(t *testing.T) {
+	in, err := Discover(net.FlagMulticast)
+	if e.Equal(err, ErrNoInt) {
+		t.Log("No multicast capable interface, may be this is travis.cl. Skip the test.")
+		return
+	} else if err != nil {
+		t.Fatal(e.Trace(e.Forward(err)))
+	}
+
+	server := &Server{}
+	server.Interface = in
+	server.Port = "3333"
+	server.Protocol = func(addr *net.UDPAddr, req *Request) (resp *Response, err error) {
+		if string(req.Data) != "request" {
+			return nil, e.New("protocol error")
+		}
+		t.Log(req)
+		return &Response{
+			Data: []byte("msg"),
+		}, nil
+	}
+	err = server.Do()
+	if err != nil {
+		t.Fatal(e.Trace(e.Forward(err)))
+	}
+	defer server.Close()
+
+	client := &Client{}
+	client.Interface = in
+	client.Port = server.Port
+	client.Request = func(dst *net.UDPAddr) (*Request, error) {
+		return &Request{
+			Data: []byte("request"),
+		}, nil
+	}
+	resp1, err := client.Discover()
+	if err != nil {
+		t.Fatal(e.Trace(e.Forward(err)))
+	}
+	if string(resp1.Data) != "msg" {
+		t.Fatal("received wrong message", string(resp1.Data))
+	}
+	t.Log(resp1)
+
+	resp2, err := client.Discover()
+	if err != nil {
+		t.Fatal(e.Trace(e.Forward(err)))
+	}
+	if string(resp2.Data) != "msg" {
+		t.Fatal("received wrong message", string(resp2.Data))
+	}
+	t.Log(resp2)
+
+	if resp1.Id != resp2.Id || resp1.Seq != resp2.Seq {
+		t.Fatal("not the same session")
+	}
+}
+
 // Example demonstrate discovery in work.
 func Example() {
 	server := &Server{}

@@ -31,6 +31,7 @@ type Client struct {
 	Deadline time.Duration
 	// Request function returns the data that will be send to the server.
 	Request func(dst *net.UDPAddr) (*Request, error)
+	id      string
 }
 
 // Discover funtion discovers the server and returns the data sent by the server.
@@ -56,6 +57,7 @@ func (c *Client) Discover() (*Response, error) {
 	if err != nil {
 		return nil, e.Forward(err)
 	}
+	c.id = resp.Id
 	return resp, nil
 }
 
@@ -129,6 +131,7 @@ func (c *Client) client(addr string) (*Response, error) {
 		if err != nil {
 			return nil, e.Forward(err)
 		}
+		req.Id = c.id
 		req.Ip = conn.LocalAddr().String()
 		reqBuf := bytes.NewBuffer([]byte{})
 		enc := gob.NewEncoder(reqBuf)
