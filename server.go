@@ -101,15 +101,18 @@ func (a *Server) Do() error {
 					return
 				}
 
+				var newseq []*net.UDPAddr
+				uuid := req.Id
+
 				a.lck.Lock()
-				r, found := a.clients[req.Id]
+				r, found := a.clients[uuid]
 				if found {
 					resp.Id = r.Id
 					resp.Ip = addr.String()
 					resp.Seq = r.Seq
 				} else {
-					a.seq = append(a.seq, addr)
-					uuid, err := rand.Uuid()
+					newseq = append(a.seq, addr)
+					uuid, err = rand.Uuid()
 					if err != nil {
 						log.Printf("Server - Protocol fail for %v with error: %v", addr, e.Trace(e.New(err)))
 						a.sendErr(addr, e.Push(err, e.New("protocol error")))
@@ -118,10 +121,8 @@ func (a *Server) Do() error {
 					}
 					resp.Id = uuid
 					resp.Ip = addr.String()
-					resp.Seq = uint16(len(a.seq) - 1)
-					a.clients[uuid] = resp
+					resp.Seq = uint16(len(newseq) - 1)
 				}
-				a.lck.Unlock()
 
 				respBuf := bytes.NewBuffer([]byte{})
 				enc := gob.NewEncoder(respBuf)
@@ -129,28 +130,39 @@ func (a *Server) Do() error {
 				if err != nil {
 					log.Printf("Server - Protocol fail for %v with error: %v", addr, e.Trace(e.New(err)))
 					a.sendErr(addr, e.Push(err, e.New("error enconding response")))
+					a.lck.Unlock()
 					return
 				}
 				if respBuf.Len() > a.BufSize {
 					log.Printf("Server - Protocol fail for %v message is too big (%v).", addr, respBuf.Len())
 					a.sendErr(addr, e.Push(err, e.New("response is too long %v", respBuf.Len())))
+					a.lck.Unlock()
 					return
 				}
 				n, oob, err := a.conn.WriteMsgUDP(respBuf.Bytes(), nil, addr)
 				if e.Contains(err, "use of closed network connection") {
+					a.lck.Unlock()
 					return
 				} else if err != nil {
 					log.Printf("Server - WriteMsgUDP (%v) failed: %v", addr, e.Trace(e.New(err)))
+					a.lck.Unlock()
 					return
 				}
 				if oob != 0 {
 					log.Printf("Server - WriteMsgUDP to %v failed: %v, %v", addr, n, oob)
+					a.lck.Unlock()
 					return
 				}
 				if n != respBuf.Len() {
 					log.Printf("Server - WriteMsgUDP to %v failed: %v, %v", addr, n, oob)
+					a.lck.Unlock()
 					return
 				}
+
+				a.seq = newseq
+				a.clients[uuid] = resp
+				a.lck.Unlock()
+
 			}(addr, buf[:n])
 		}
 	}()

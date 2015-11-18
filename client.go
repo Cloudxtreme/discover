@@ -152,6 +152,7 @@ func (c *Client) client(addr string) (*Response, error) {
 		} else if err != nil {
 			return nil, e.New(err)
 		}
+
 		err = conn.SetDeadline(time.Now().Add(c.Deadline))
 		if err != nil {
 			return nil, e.New(err)
