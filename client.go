@@ -6,6 +6,8 @@ package discover
 
 import (
 	"bytes"
+	"crypto/rsa"
+	"encoding/binary"
 	"encoding/gob"
 	"net"
 	"strconv"
@@ -13,6 +15,7 @@ import (
 	"time"
 
 	"github.com/fcavani/e"
+	"github.com/fcavani/log"
 	utilNet "github.com/fcavani/net"
 )
 
@@ -30,8 +33,14 @@ type Client struct {
 	// Deadline is the udp io deadline
 	Deadline time.Duration
 	// Request function returns the data that will be send to the server.
-	Request func(dst *net.UDPAddr) (*Request, error)
-	id      string
+	Request    func(dst *net.UDPAddr) (*Request, error)
+	ServerName string
+	//ServerKey is the server public key
+	ServerKey *rsa.PublicKey
+	// Name is the name of this client. This is used to pick the right public key.
+	Name       string
+	PrivateKey *rsa.PrivateKey
+	id         string
 }
 
 // Discover funtion discovers the server and returns the data sent by the server.
@@ -40,7 +49,7 @@ func (c *Client) Discover() (*Response, error) {
 		c.Port = "3456"
 	}
 	if c.BufSize <= 0 {
-		c.BufSize = 512
+		c.BufSize = 1024
 	}
 	if c.Timeout <= 0 {
 		c.Timeout = 2 * time.Minute
@@ -86,6 +95,93 @@ func (c *Client) getAddr() (*Response, error) {
 	return nil, e.Push(er, e.New("no addresses capable for listen udp"))
 }
 
+func (c *Client) encode(conn *net.UDPConn, typ msgType, val interface{}, dst *net.UDPAddr) error {
+	reqBuf := bytes.NewBuffer([]byte{})
+
+	buf := make([]byte, binary.MaxVarintLen16)
+	binary.PutUvarint(buf, uint64(typ))
+	n, err := reqBuf.Write(buf)
+	if err != nil {
+		return e.Push(err, "error enconding message type")
+	}
+	if n != len(buf) {
+		return e.Push(err, "error enconding message type")
+	}
+
+	enc := gob.NewEncoder(reqBuf)
+	err = enc.Encode(val)
+	if err != nil {
+		return e.Push(err, e.New("error encoding"))
+	}
+
+	msg, err := NewMsg(c.Name, c.ServerName, c.PrivateKey, c.ServerKey, reqBuf.Bytes())
+	if err != nil {
+		return e.Push(err, "erro cryptographing the value")
+	}
+
+	reqBuf = bytes.NewBuffer([]byte{})
+	enc = gob.NewEncoder(reqBuf)
+	err = enc.Encode(msg)
+	if err != nil {
+		return e.Push(err, e.New("error encoding"))
+	}
+
+	if reqBuf.Len() > c.BufSize {
+		return e.New("value to encode is too big %v", reqBuf.Len())
+	}
+	err = conn.SetDeadline(time.Now().Add(c.Deadline))
+	if err != nil {
+		return e.New(err)
+	}
+	_, _, err = conn.WriteMsgUDP(reqBuf.Bytes(), nil, dst)
+	if err != nil {
+		return e.New(err)
+	}
+	return nil
+}
+
+func (c *Client) response(conn *net.UDPConn) (*Response, error) {
+	buf := make([]byte, c.BufSize)
+	err := conn.SetDeadline(time.Now().Add(c.Deadline))
+	if err != nil {
+		return nil, e.New(err)
+	}
+	n, _, err := conn.ReadFromUDP(buf)
+	if err != nil {
+		return nil, e.New(err)
+	}
+
+	dec := gob.NewDecoder(bytes.NewReader(buf[:n]))
+	var msg Msg
+	err = dec.Decode(&msg)
+	if err != nil {
+		return nil, e.Push(err, e.New("error decoding response"))
+	}
+
+	if msg.From != c.ServerName {
+		return nil, e.New("wrong server name")
+	}
+	if msg.To != c.Name {
+		return nil, e.New("message isn't for me")
+	}
+
+	buf, err = msg.Message(c.ServerKey, c.PrivateKey)
+	if err != nil {
+		return nil, e.Push(err, e.New("error decrypting response"))
+	}
+
+	dec = gob.NewDecoder(bytes.NewReader(buf))
+	var resp Response
+	err = dec.Decode(&resp)
+	if err != nil {
+		return nil, e.Push(err, e.New("error decoding response"))
+	}
+	if resp.Err != nil {
+		return nil, e.Forward(resp.Err)
+	}
+	return &resp, nil
+}
+
 func (c *Client) client(addr string) (*Response, error) {
 	ip, err := ipport(c.Interface, addr, "0")
 	if err != nil {
@@ -123,7 +219,8 @@ func (c *Client) client(addr string) (*Response, error) {
 	} else {
 		return nil, e.New("interface isn't suported: %v", c.iface.Flags)
 	}
-	buf := make([]byte, c.BufSize)
+	log.Tag("discover", "client").Printf("Local ip %v.", conn.LocalAddr())
+	log.Tag("discover", "client").Printf("Try to contact server in %v.", dst)
 	now := time.Now()
 	end := now.Add(c.Timeout)
 	for d := now; d.Before(end) || d.Equal(end); d = time.Now() {
@@ -131,48 +228,47 @@ func (c *Client) client(addr string) (*Response, error) {
 		if err != nil {
 			return nil, e.Forward(err)
 		}
+
 		req.Id = c.id
 		req.Ip = conn.LocalAddr().String()
-		reqBuf := bytes.NewBuffer([]byte{})
-		enc := gob.NewEncoder(reqBuf)
-		err = enc.Encode(req)
-		if err != nil {
-			return nil, e.Push(err, e.New("error encoding request"))
-		}
-		if reqBuf.Len() > c.BufSize {
-			return nil, e.New("request is too big %v", reqBuf.Len())
-		}
-		err = conn.SetDeadline(time.Now().Add(c.Deadline))
-		if err != nil {
-			return nil, e.New(err)
-		}
-		_, _, err = conn.WriteMsgUDP(reqBuf.Bytes(), nil, dst)
+
+		err = c.encode(conn, protoReq, req, dst)
 		if e.Contains(err, "i/o timeout") {
+			log.Errorf("Error %v -> %v: %v", conn.LocalAddr(), dst, err)
 			continue
 		} else if err != nil {
-			return nil, e.New(err)
+			return nil, e.Forward(err)
 		}
 
-		err = conn.SetDeadline(time.Now().Add(c.Deadline))
-		if err != nil {
-			return nil, e.New(err)
-		}
-		n, _, err := conn.ReadFromUDP(buf)
+		resp, err := c.response(conn)
 		if e.Contains(err, "i/o timeout") {
+			log.Errorf("Error %v -> %v: %v", conn.LocalAddr(), dst, err)
 			continue
 		} else if err != nil {
-			return nil, e.New(err)
+			return nil, e.Forward(err)
 		}
-		dec := gob.NewDecoder(bytes.NewReader(buf[:n]))
-		var resp Response
-		err = dec.Decode(&resp)
-		if err != nil {
-			return nil, e.Push(err, e.New("error decoding response"))
+
+		err = c.encode(conn, protoConfirm, resp.Id, dst)
+		if e.Contains(err, "i/o timeout") {
+			log.Errorf("Error %v -> %v: %v", conn.LocalAddr(), dst, err)
+			continue
+		} else if err != nil {
+			return nil, e.Forward(err)
 		}
-		if resp.Err != nil {
-			return nil, e.Forward(resp.Err)
+
+		rp, err := c.response(conn)
+		if e.Contains(err, "i/o timeout") {
+			log.Errorf("Error %v -> %v: %v", conn.LocalAddr(), dst, err)
+			continue
+		} else if err != nil {
+			return nil, e.Forward(err)
 		}
-		return &resp, nil
+
+		if rp.Id != resp.Id {
+			return nil, e.New("protocol fail wrong response")
+		}
+
+		return resp, nil
 	}
 	return nil, e.New("can't find the server")
 }

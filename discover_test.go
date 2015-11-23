@@ -5,6 +5,8 @@
 package discover
 
 import (
+	"crypto/rand"
+	"crypto/rsa"
 	"fmt"
 	"net"
 	"testing"
@@ -12,6 +14,25 @@ import (
 
 	"github.com/fcavani/e"
 )
+
+var MasterKey *rsa.PrivateKey
+var SlaveKey *rsa.PrivateKey
+var Keys *PubKeys
+
+func TestKeys(t *testing.T) {
+	var err error
+	MasterKey, err = rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	SlaveKey, err = rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	Keys = NewPubKeys()
+	Keys.Put("master", &MasterKey.PublicKey)
+	Keys.Put("slave", &SlaveKey.PublicKey)
+}
 
 func TestServerMultiCast(t *testing.T) {
 	in, err := Discover(net.FlagMulticast)
@@ -23,6 +44,9 @@ func TestServerMultiCast(t *testing.T) {
 	}
 
 	server := &Server{}
+	server.Name = "master"
+	server.PrivateKey = MasterKey
+	server.PubKeys = Keys
 	server.Interface = in
 	server.Port = "3333"
 	server.Protocol = func(addr *net.UDPAddr, req *Request) (resp *Response, err error) {
@@ -41,6 +65,10 @@ func TestServerMultiCast(t *testing.T) {
 	defer server.Close()
 
 	client := &Client{}
+	client.ServerName = "master"
+	client.ServerKey = &MasterKey.PublicKey
+	client.Name = "slave"
+	client.PrivateKey = SlaveKey
 	client.Interface = in
 	client.Port = server.Port
 	client.Request = func(dst *net.UDPAddr) (*Request, error) {
@@ -65,6 +93,9 @@ func TestServerLocalhost(t *testing.T) {
 	}
 
 	server := &Server{}
+	server.Name = "master"
+	server.PrivateKey = MasterKey
+	server.PubKeys = Keys
 	server.Interface = in
 	server.Protocol = func(addr *net.UDPAddr, req *Request) (resp *Response, err error) {
 		if string(req.Data) != "request" {
@@ -82,6 +113,10 @@ func TestServerLocalhost(t *testing.T) {
 	defer server.Close()
 
 	client := &Client{}
+	client.ServerName = "master"
+	client.ServerKey = &MasterKey.PublicKey
+	client.Name = "slave"
+	client.PrivateKey = SlaveKey
 	client.Interface = in
 	client.Port = server.Port
 	client.Request = func(dst *net.UDPAddr) (*Request, error) {
@@ -106,6 +141,9 @@ func TestServerBroadcast(t *testing.T) {
 	}
 
 	server := &Server{}
+	server.Name = "master"
+	server.PrivateKey = MasterKey
+	server.PubKeys = Keys
 	server.Interface = in
 	server.NotMulticast = true
 	server.Protocol = func(addr *net.UDPAddr, req *Request) (resp *Response, err error) {
@@ -124,6 +162,10 @@ func TestServerBroadcast(t *testing.T) {
 	defer server.Close()
 
 	client := &Client{}
+	client.ServerName = "master"
+	client.ServerKey = &MasterKey.PublicKey
+	client.Name = "slave"
+	client.PrivateKey = SlaveKey
 	client.Interface = in
 	client.NotMulticast = true
 	client.Port = server.Port
@@ -145,6 +187,9 @@ func TestServerBroadcast(t *testing.T) {
 func TestServerAny(t *testing.T) {
 	time.Sleep(2 * time.Second)
 	server := &Server{}
+	server.Name = "master"
+	server.PrivateKey = MasterKey
+	server.PubKeys = Keys
 	server.Protocol = func(addr *net.UDPAddr, req *Request) (resp *Response, err error) {
 		if string(req.Data) != "request" {
 			return nil, e.New("protocol error")
@@ -161,6 +206,10 @@ func TestServerAny(t *testing.T) {
 	defer server.Close()
 
 	client := &Client{}
+	client.ServerName = "master"
+	client.ServerKey = &MasterKey.PublicKey
+	client.Name = "slave"
+	client.PrivateKey = SlaveKey
 	client.Port = server.Port
 	client.Request = func(dst *net.UDPAddr) (*Request, error) {
 		return &Request{
@@ -186,6 +235,9 @@ func TestServerIpv4lo(t *testing.T) {
 	server := &Server{}
 	server.Interface = in
 	server.AddrVer = Ipv4
+	server.Name = "master"
+	server.PrivateKey = MasterKey
+	server.PubKeys = Keys
 	server.Protocol = func(addr *net.UDPAddr, req *Request) (resp *Response, err error) {
 		if string(req.Data) != "request" {
 			return nil, e.New("protocol error")
@@ -202,6 +254,10 @@ func TestServerIpv4lo(t *testing.T) {
 	defer server.Close()
 
 	client := &Client{}
+	client.ServerName = "master"
+	client.ServerKey = &MasterKey.PublicKey
+	client.Name = "slave"
+	client.PrivateKey = SlaveKey
 	client.Interface = in
 	client.AddrVer = Ipv4
 	client.Port = server.Port
@@ -227,6 +283,9 @@ func TestServerIpv4bc(t *testing.T) {
 	}
 
 	server := &Server{}
+	server.Name = "master"
+	server.PrivateKey = MasterKey
+	server.PubKeys = Keys
 	server.Interface = in
 	server.AddrVer = Ipv4
 	server.Protocol = func(addr *net.UDPAddr, req *Request) (resp *Response, err error) {
@@ -245,6 +304,10 @@ func TestServerIpv4bc(t *testing.T) {
 	defer server.Close()
 
 	client := &Client{}
+	client.ServerName = "master"
+	client.ServerKey = &MasterKey.PublicKey
+	client.Name = "slave"
+	client.PrivateKey = SlaveKey
 	client.Interface = in
 	client.AddrVer = Ipv4
 	client.Port = server.Port
@@ -273,6 +336,9 @@ func TestServerIpv4mc(t *testing.T) {
 	}
 
 	server := &Server{}
+	server.Name = "master"
+	server.PrivateKey = MasterKey
+	server.PubKeys = Keys
 	server.Interface = in
 	server.AddrVer = Ipv4
 	server.Protocol = func(addr *net.UDPAddr, req *Request) (resp *Response, err error) {
@@ -291,6 +357,10 @@ func TestServerIpv4mc(t *testing.T) {
 	defer server.Close()
 
 	client := &Client{}
+	client.ServerName = "master"
+	client.ServerKey = &MasterKey.PublicKey
+	client.Name = "slave"
+	client.PrivateKey = SlaveKey
 	client.Interface = in
 	client.AddrVer = Ipv4
 	client.Port = server.Port
@@ -311,6 +381,9 @@ func TestServerIpv4mc(t *testing.T) {
 
 func TestServerFail(t *testing.T) {
 	server := &Server{}
+	server.Name = "master"
+	server.PrivateKey = MasterKey
+	server.PubKeys = Keys
 	server.Interface = ":)"
 	server.AddrVer = Any
 	server.Protocol = func(addr *net.UDPAddr, req *Request) (resp *Response, err error) {
@@ -330,6 +403,10 @@ func TestServerFail(t *testing.T) {
 
 func TestClientFail(t *testing.T) {
 	client := &Client{}
+	client.ServerName = "master"
+	client.ServerKey = &MasterKey.PublicKey
+	client.Name = "slave"
+	client.PrivateKey = SlaveKey
 	client.Interface = ":)"
 	client.AddrVer = Any
 	client.Port = "6464"
@@ -344,6 +421,10 @@ func TestClientFail(t *testing.T) {
 	}
 
 	client = &Client{}
+	client.ServerName = "master"
+	client.ServerKey = &MasterKey.PublicKey
+	client.Name = "slave"
+	client.PrivateKey = SlaveKey
 	client.AddrVer = Any
 	client.Port = "6465"
 	client.Timeout = 1 * time.Second
@@ -366,6 +447,9 @@ func TestServerProtocolFail(t *testing.T) {
 	}
 
 	server := &Server{}
+	server.Name = "master"
+	server.PrivateKey = MasterKey
+	server.PubKeys = Keys
 	server.Interface = in
 	server.AddrVer = Ipv4
 	server.Protocol = func(addr *net.UDPAddr, req *Request) (resp *Response, err error) {
@@ -384,6 +468,10 @@ func TestServerProtocolFail(t *testing.T) {
 	defer server.Close()
 
 	client := &Client{}
+	client.ServerName = "master"
+	client.ServerKey = &MasterKey.PublicKey
+	client.Name = "slave"
+	client.PrivateKey = SlaveKey
 	client.Interface = in
 	client.AddrVer = Ipv4
 	client.Port = server.Port
@@ -408,6 +496,9 @@ func TestClientAgain(t *testing.T) {
 	}
 
 	server := &Server{}
+	server.Name = "master"
+	server.PrivateKey = MasterKey
+	server.PubKeys = Keys
 	server.Interface = in
 	server.Port = "3333"
 	server.Protocol = func(addr *net.UDPAddr, req *Request) (resp *Response, err error) {
@@ -426,6 +517,10 @@ func TestClientAgain(t *testing.T) {
 	defer server.Close()
 
 	client := &Client{}
+	client.ServerName = "master"
+	client.ServerKey = &MasterKey.PublicKey
+	client.Name = "slave"
+	client.PrivateKey = SlaveKey
 	client.Interface = in
 	client.Port = server.Port
 	client.Request = func(dst *net.UDPAddr) (*Request, error) {
@@ -458,7 +553,21 @@ func TestClientAgain(t *testing.T) {
 
 // Example demonstrate discovery in work.
 func Example() {
+	masterKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		fmt.Println(err)
+	}
+	slaveKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		fmt.Println(err)
+	}
+	keys := NewPubKeys()
+	keys.Put("slave", &slaveKey.PublicKey)
+
 	server := &Server{}
+	server.Name = "master"
+	server.PrivateKey = masterKey
+	server.PubKeys = keys
 	server.Protocol = func(addr *net.UDPAddr, req *Request) (resp *Response, err error) {
 		if string(req.Data) != "request" {
 			return nil, e.New("protocol error")
@@ -467,13 +576,17 @@ func Example() {
 			Data: []byte("msg"),
 		}, nil
 	}
-	err := server.Do()
+	err = server.Do()
 	if err != nil {
 		fmt.Println(err)
 	}
 	defer server.Close()
 
 	client := &Client{}
+	client.ServerName = "master"
+	client.ServerKey = &masterKey.PublicKey
+	client.Name = "slave"
+	client.PrivateKey = slaveKey
 	client.Port = server.Port
 	client.Request = func(dst *net.UDPAddr) (*Request, error) {
 		return &Request{

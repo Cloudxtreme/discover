@@ -6,15 +6,26 @@ package discover
 
 import (
 	"bytes"
+	"crypto/rsa"
+	"encoding/binary"
 	"encoding/gob"
 	"net"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/fcavani/e"
 	"github.com/fcavani/log"
 	utilNet "github.com/fcavani/net"
 	"github.com/fcavani/rand"
+)
+
+type msgType uint16
+
+const (
+	protoReq msgType = iota
+	protoConfirm
+	protoKeepAlive
 )
 
 // Server wait for a client and send some data to it.
@@ -28,10 +39,18 @@ type Server struct {
 	BufSize int
 	// Protocol function receive data from client and return something to this client.
 	Protocol func(addr *net.UDPAddr, req *Request) (resp *Response, err error)
-	conn     *net.UDPConn
-	seq      []*net.UDPAddr
-	clients  map[string]*Response
-	lck      sync.Mutex
+	// PrivateKey is the server private key
+	PrivateKey *rsa.PrivateKey
+	// PubKeys hold all pubkeys that will be used.
+	PubKeys *PubKeys
+	// Duration time of one session
+	Duration time.Duration
+	// Name is the server name. Used to identify the key
+	Name   string
+	conn   *net.UDPConn
+	seq    []*net.UDPAddr
+	lckSeq sync.Mutex
+	ctxs   *contexts
 }
 
 func (a *Server) sendErr(addr *net.UDPAddr, er error) {
@@ -42,16 +61,16 @@ func (a *Server) sendErr(addr *net.UDPAddr, er error) {
 	}
 	err := enc.Encode(resp)
 	if err != nil {
-		log.Error("Error encoding erro response:", err)
+		log.Tag("discover", "server").Error("Error encoding erro response:", err)
 		return
 	}
 	if respBuf.Len() > a.BufSize {
-		log.Error("Error encoding erro response: error response is too long", respBuf.Len())
+		log.Tag("discover", "server").Error("Error encoding erro response: error response is too long", respBuf.Len())
 		return
 	}
 	_, _, err = a.conn.WriteMsgUDP(respBuf.Bytes(), nil, addr)
 	if err != nil {
-		log.Error("Error sending erro response:", err)
+		log.Tag("discover", "server").Error("Error sending erro response:", err)
 	}
 }
 
@@ -62,10 +81,16 @@ func (a *Server) Do() error {
 		a.Port = "0"
 	}
 	if a.BufSize <= 0 {
-		a.BufSize = 512
+		a.BufSize = 1024
+	}
+	if a.Duration == 0 {
+		a.Duration = 24 * time.Hour
+	}
+	if a.Name == "" {
+		a.Name = "master"
 	}
 	a.seq = make([]*net.UDPAddr, 0)
-	a.clients = make(map[string]*Response)
+	a.ctxs = newContexts(a.Duration, 300*time.Second)
 	a.InitMCast()
 	err := a.getInt()
 	if err != nil {
@@ -82,91 +107,192 @@ func (a *Server) Do() error {
 			if e.Contains(err, "use of closed network connection") {
 				return
 			} else if err != nil {
-				log.Printf("Server - ReadFromUDP (%v) failed: %v", addr, e.Trace(e.New(err)))
+				log.Tag("discover", "server").Printf("Server - ReadFromUDP (%v) failed: %v", addr, e.Trace(e.New(err)))
 				continue
 			}
-			go func(addr *net.UDPAddr, buf []byte) {
-				dec := gob.NewDecoder(bytes.NewReader(buf))
-				var req Request
-				err = dec.Decode(&req)
-				if err != nil {
-					log.Printf("Server - Protocol fail for %v with error: %v", addr, e.Trace(e.New(err)))
-					a.sendErr(addr, e.Push(err, e.New("error decoding request")))
-					return
-				}
-				resp, err := a.Protocol(addr, &req)
-				if err != nil {
-					log.Printf("Server - Protocol fail for %v with error: %v", addr, e.Trace(e.New(err)))
-					a.sendErr(addr, e.Push(err, e.New("protocol error")))
-					return
-				}
 
-				var newseq []*net.UDPAddr
-				uuid := req.Id
+			dec := gob.NewDecoder(bytes.NewReader(buf[:n]))
+			var msg Msg
+			err = dec.Decode(&msg)
+			if err != nil {
+				log.Tag("discover", "server").Printf("Can't decode data from %v.", addr)
+				continue
+			}
 
-				a.lck.Lock()
-				r, found := a.clients[uuid]
-				if found {
-					resp.Id = r.Id
-					resp.Ip = addr.String()
-					resp.Seq = r.Seq
-				} else {
-					newseq = append(a.seq, addr)
-					uuid, err = rand.Uuid()
-					if err != nil {
-						log.Printf("Server - Protocol fail for %v with error: %v", addr, e.Trace(e.New(err)))
-						a.sendErr(addr, e.Push(err, e.New("protocol error")))
-						a.lck.Unlock()
-						return
-					}
-					resp.Id = uuid
-					resp.Ip = addr.String()
-					resp.Seq = uint16(len(newseq) - 1)
-				}
+			pubkey, err := a.PubKeys.Get(msg.From)
+			if err != nil {
+				log.Tag("discover", "server").Printf("Invalid %v sender from %v.", msg.From, addr)
+				continue
+			}
 
-				respBuf := bytes.NewBuffer([]byte{})
-				enc := gob.NewEncoder(respBuf)
-				err = enc.Encode(resp)
-				if err != nil {
-					log.Printf("Server - Protocol fail for %v with error: %v", addr, e.Trace(e.New(err)))
-					a.sendErr(addr, e.Push(err, e.New("error enconding response")))
-					a.lck.Unlock()
-					return
-				}
-				if respBuf.Len() > a.BufSize {
-					log.Printf("Server - Protocol fail for %v message is too big (%v).", addr, respBuf.Len())
-					a.sendErr(addr, e.Push(err, e.New("response is too long %v", respBuf.Len())))
-					a.lck.Unlock()
-					return
-				}
-				n, oob, err := a.conn.WriteMsgUDP(respBuf.Bytes(), nil, addr)
-				if e.Contains(err, "use of closed network connection") {
-					a.lck.Unlock()
-					return
-				} else if err != nil {
-					log.Printf("Server - WriteMsgUDP (%v) failed: %v", addr, e.Trace(e.New(err)))
-					a.lck.Unlock()
-					return
-				}
-				if oob != 0 {
-					log.Printf("Server - WriteMsgUDP to %v failed: %v, %v", addr, n, oob)
-					a.lck.Unlock()
-					return
-				}
-				if n != respBuf.Len() {
-					log.Printf("Server - WriteMsgUDP to %v failed: %v, %v", addr, n, oob)
-					a.lck.Unlock()
-					return
-				}
+			buf, err = msg.Message(pubkey, a.PrivateKey)
+			if err != nil {
+				log.Tag("discover", "server").Printf("Invalid message from %v: %v.", addr, err)
+				continue
+			}
 
-				a.seq = newseq
-				a.clients[uuid] = resp
-				a.lck.Unlock()
-
-			}(addr, buf[:n])
+			if len(buf) < binary.MaxVarintLen16 {
+				log.Tag("discover", "server").Printf("Read insulficient data from %v.", addr)
+				continue
+			}
+			typ, b := binary.Uvarint(buf[:binary.MaxVarintLen16])
+			if b <= 0 {
+				log.Tag("discover", "server").Print("Invalid package type from %v.", addr)
+				continue
+			}
+			switch msgType(typ) {
+			case protoConfirm:
+				go a.confirm(addr, msg.From, pubkey, buf[binary.MaxVarintLen16:])
+			case protoReq:
+				go a.request(addr, msg.From, pubkey, buf[binary.MaxVarintLen16:])
+			case protoKeepAlive:
+				go a.keepalive(addr, msg.From, pubkey, buf[binary.MaxVarintLen16:])
+			default:
+				log.Tag("discover", "server").Errorf("Protocol error. (%v)", typ)
+			}
 		}
 	}()
 	return nil
+}
+
+func (a *Server) sendResp(resp *Response, to string, tokey *rsa.PublicKey, addr *net.UDPAddr) {
+	respBuf := bytes.NewBuffer([]byte{})
+	enc := gob.NewEncoder(respBuf)
+	err := enc.Encode(resp)
+	if err != nil {
+		log.Tag("discover", "server").Printf("Server - Protocol fail for %v with error: %v", addr, e.Trace(e.New(err)))
+		a.sendErr(addr, e.Push(err, e.New("error enconding response")))
+		return
+	}
+
+	msg, err := NewMsg(a.Name, to, a.PrivateKey, tokey, respBuf.Bytes())
+	if err != nil {
+		log.Tag("discover", "server").Printf("Server - Protocol fail for %v with error: %v", addr, e.Trace(e.New(err)))
+		a.sendErr(addr, e.Push(err, e.New("error creating new response message")))
+		return
+	}
+
+	respBuf = bytes.NewBuffer([]byte{})
+	enc = gob.NewEncoder(respBuf)
+	err = enc.Encode(msg)
+	if err != nil {
+		log.Tag("discover", "server").Printf("Server - Protocol fail for %v with error: %v", addr, e.Trace(e.New(err)))
+		a.sendErr(addr, e.Push(err, e.New("error enconding response")))
+		return
+	}
+
+	if respBuf.Len() > a.BufSize {
+		log.Tag("discover", "server").Printf("Server - Protocol fail for %v message is too big (%v).", addr, respBuf.Len())
+		a.sendErr(addr, e.Push(err, e.New("response is too long %v", respBuf.Len())))
+		return
+	}
+	n, oob, err := a.conn.WriteMsgUDP(respBuf.Bytes(), nil, addr)
+	if e.Contains(err, "use of closed network connection") {
+		return
+	} else if err != nil {
+		log.Tag("discover", "server").Printf("Server - WriteMsgUDP (%v) failed: %v", addr, e.Trace(e.New(err)))
+		return
+	}
+	if oob != 0 {
+		log.Tag("discover", "server").Printf("Server - WriteMsgUDP to %v failed: %v, %v", addr, n, oob)
+		return
+	}
+	if n != respBuf.Len() {
+		log.Tag("discover", "server").Printf("Server - WriteMsgUDP to %v failed: %v, %v", addr, n, oob)
+		return
+	}
+}
+
+func (a *Server) request(addr *net.UDPAddr, to string, tokey *rsa.PublicKey, buf []byte) {
+	dec := gob.NewDecoder(bytes.NewReader(buf))
+	var req Request
+	err := dec.Decode(&req)
+	if err != nil {
+		log.Tag("discover", "server").Printf("Server - Protocol fail for %v with error: %v", addr, e.Trace(e.New(err)))
+		a.sendErr(addr, e.Push(err, e.New("error decoding request")))
+		return
+	}
+	resp, err := a.Protocol(addr, &req)
+	if err != nil {
+		log.Tag("discover", "server").Printf("Server - Protocol fail for %v with error: %v", addr, e.Trace(e.New(err)))
+		a.sendErr(addr, e.Push(err, e.New("protocol error")))
+		return
+	}
+
+	ctx, err := a.ctxs.Get(req.Id)
+	if err != nil {
+		uuid, err := rand.Uuid()
+		if err != nil {
+			log.Tag("discover", "server").Printf("Server - Protocol fail for %v with error: %v", addr, e.Trace(e.New(err)))
+			a.sendErr(addr, e.Push(err, e.New("protocol error")))
+			return
+		}
+		resp.Id = uuid
+		resp.Ip = addr.String()
+		resp.Seq = uint16(len(a.seq))
+		err = a.ctxs.Register(&context{
+			Id:   uuid,
+			Seq:  resp.Seq,
+			Addr: addr,
+		})
+		if err != nil {
+			log.Tag("discover", "server").Printf("Server - Protocol fail for %v with error: %v", addr, e.Trace(e.New(err)))
+			a.sendErr(addr, e.Push(err, e.New("protocol error")))
+			return
+		}
+	} else {
+		resp.Id = ctx.Id
+		resp.Ip = ctx.Addr.String()
+		resp.Seq = ctx.Seq
+	}
+	a.sendResp(resp, to, tokey, addr)
+}
+
+func (a *Server) confirm(addr *net.UDPAddr, to string, tokey *rsa.PublicKey, buf []byte) {
+	dec := gob.NewDecoder(bytes.NewReader(buf))
+	var id string
+	err := dec.Decode(&id)
+	if err != nil {
+		log.Tag("discover", "server").Printf("Server - Protocol fail for %v with error: %v", addr, e.Trace(e.New(err)))
+		a.sendErr(addr, e.Push(err, e.New("error decoding id")))
+		return
+	}
+	ctx, err := a.ctxs.Get(id)
+	if err != nil {
+		log.Tag("discover", "server").Printf("Server - Protocol fail for %v with error: %v", addr, e.Trace(e.New(err)))
+		a.sendErr(addr, e.Push(err, e.New("id is invalid")))
+		return
+	}
+	a.lckSeq.Lock()
+	a.seq = append(a.seq, ctx.Addr)
+	a.lckSeq.Unlock()
+	a.sendResp(&Response{
+		Id:  ctx.Id,
+		Ip:  ctx.Addr.String(),
+		Seq: ctx.Seq,
+	}, to, tokey, addr)
+}
+
+func (a *Server) keepalive(addr *net.UDPAddr, to string, tokey *rsa.PublicKey, buf []byte) {
+	dec := gob.NewDecoder(bytes.NewReader(buf))
+	var id string
+	err := dec.Decode(&id)
+	if err != nil {
+		log.Tag("discover", "server").Printf("Server - Protocol fail for %v with error: %v", addr, e.Trace(e.New(err)))
+		a.sendErr(addr, e.Push(err, e.New("error decoding id")))
+		return
+	}
+	ctx, err := a.ctxs.Get(id)
+	if err != nil {
+		log.Tag("discover", "server").Printf("Server - Protocol fail for %v with error: %v", addr, e.Trace(e.New(err)))
+		a.sendErr(addr, e.Push(err, e.New("id is invalid")))
+		return
+	}
+	a.sendResp(&Response{
+		Id:  ctx.Id,
+		Ip:  ctx.Addr.String(),
+		Seq: ctx.Seq,
+	}, to, tokey, addr)
 }
 
 // Close terminates the server.
@@ -175,6 +301,7 @@ func (a *Server) Close() error {
 	if err != nil {
 		return e.Forward(err)
 	}
+	a.ctxs.Close()
 	return nil
 }
 
