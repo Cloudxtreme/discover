@@ -229,7 +229,9 @@ func (a *Server) request(addr *net.UDPAddr, to string, tokey *rsa.PublicKey, buf
 		}
 		resp.Id = uuid
 		resp.Ip = addr.String()
+		a.lckSeq.Lock()
 		resp.Seq = uint16(len(a.seq))
+		a.lckSeq.Unlock()
 		err = a.ctxs.Register(&context{
 			Id:   uuid,
 			Seq:  resp.Seq,
