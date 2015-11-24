@@ -75,7 +75,6 @@ func (c *Client) getAddr() (*Response, error) {
 	if err != nil {
 		return nil, e.New(err)
 	}
-	var er error
 	for _, addr := range addrs {
 		a := addr.String()
 		i := strings.Index(a, "/")
@@ -86,13 +85,14 @@ func (c *Client) getAddr() (*Response, error) {
 			continue
 		}
 		resp, err := c.client(a)
-		if err != nil {
-			er = e.Push(er, err)
+		if e.Equal(err, ErrCantFindInt) {
 			continue
+		} else if err != nil {
+			return nil, e.Forward(err)
 		}
 		return resp, nil
 	}
-	return nil, e.Push(er, e.New("no addresses capable for listen udp"))
+	return nil, e.New("no addresses capable for listen udp")
 }
 
 func (c *Client) encode(conn *net.UDPConn, typ msgType, val interface{}, dst *net.UDPAddr) error {
@@ -183,42 +183,44 @@ func (c *Client) response(conn *net.UDPConn) (*Response, error) {
 	return &resp, nil
 }
 
+const ErrCantFindInt = "can't find an interface with the right capabilites"
+
 func (c *Client) client(addr string) (*Response, error) {
 	ip, err := ipport(c.Interface, addr, "0")
 	if err != nil {
-		return nil, e.New(err)
+		return nil, e.Push(err, ErrCantFindInt)
 	}
 	client, err := net.ResolveUDPAddr("udp", ip)
 	if err != nil {
-		return nil, e.New(err)
+		return nil, e.Push(err, ErrCantFindInt)
 	}
 	conn, err := net.ListenUDP("udp", client)
 	if err != nil {
-		return nil, e.Push(err, "listen udp failed")
+		return nil, e.Push(err, ErrCantFindInt)
 	}
 	defer conn.Close()
 	var dst *net.UDPAddr
 	if c.iface.Flags&net.FlagLoopback == net.FlagLoopback {
 		ip, err := ipport(c.Interface, addr, c.Port)
 		if err != nil {
-			return nil, e.New(err)
+			return nil, e.Push(err, ErrCantFindInt)
 		}
 		dst, err = net.ResolveUDPAddr("udp", ip)
 		if err != nil {
-			return nil, e.New(err)
+			return nil, e.Push(err, ErrCantFindInt)
 		}
 	} else if !c.NotMulticast && c.iface.Flags&net.FlagMulticast == net.FlagMulticast {
 		dst, err = c.multicast(conn.LocalAddr())
 		if err != nil {
-			return nil, e.New(err)
+			return nil, e.Push(err, ErrCantFindInt)
 		}
 	} else if c.iface.Flags&net.FlagBroadcast == net.FlagBroadcast {
 		dst, err = broadcast(conn.LocalAddr(), c.Port)
 		if err != nil {
-			return nil, e.New(err)
+			return nil, e.Push(err, ErrCantFindInt)
 		}
 	} else {
-		return nil, e.New("interface isn't suported: %v", c.iface.Flags)
+		return nil, e.Push(e.New("interface isn't suported: %v", c.iface.Flags), ErrCantFindInt)
 	}
 	log.Tag("discover", "client").Printf("Local ip %v.", conn.LocalAddr())
 	log.Tag("discover", "client").Printf("Try to contact server in %v.", dst)

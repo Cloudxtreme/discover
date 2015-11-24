@@ -435,7 +435,7 @@ func TestClientFail(t *testing.T) {
 		}, nil
 	}
 	_, err = client.Discover()
-	if err != nil && !e.Equal(err, "no addresses capable for listen udp") {
+	if err != nil && !e.Equal(err, "can't find the server") {
 		t.Fatal(e.Trace(e.Forward(err)))
 	}
 }
