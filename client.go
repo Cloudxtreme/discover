@@ -17,6 +17,7 @@ import (
 	"github.com/fcavani/e"
 	"github.com/fcavani/log"
 	utilNet "github.com/fcavani/net"
+	"github.com/fcavani/rand"
 )
 
 // Client struct provide methods for discover a server in a multicast or broadcast network.
@@ -40,7 +41,8 @@ type Client struct {
 	// Name is the name of this client. This is used to pick the right public key.
 	Name       string
 	PrivateKey *rsa.PrivateKey
-	id         string
+	// Id is the unique identification for this client
+	Id string
 }
 
 // Discover funtion discovers the server and returns the data sent by the server.
@@ -57,8 +59,15 @@ func (c *Client) Discover() (*Response, error) {
 	if c.Deadline <= 0 {
 		c.Deadline = 10 * time.Second
 	}
+	var err error
+	if c.Id == "" {
+		c.Id, err = rand.Uuid()
+		if err != nil {
+			return nil, e.Forward(err)
+		}
+	}
 	c.InitMCast()
-	err := c.getInt()
+	err = c.getInt()
 	if err != nil {
 		return nil, e.Forward(err)
 	}
@@ -66,7 +75,6 @@ func (c *Client) Discover() (*Response, error) {
 	if err != nil {
 		return nil, e.Forward(err)
 	}
-	c.id = resp.Id
 	return resp, nil
 }
 
@@ -232,7 +240,7 @@ func (c *Client) client(addr string) (*Response, error) {
 			return nil, e.Forward(err)
 		}
 
-		req.Id = c.id
+		req.Id = c.Id
 		req.Ip = conn.LocalAddr().String()
 
 		err = c.encode(conn, protoReq, req, dst)
@@ -250,6 +258,8 @@ func (c *Client) client(addr string) (*Response, error) {
 		} else if err != nil {
 			return nil, e.Forward(err)
 		}
+
+		c.Id = resp.Id
 
 		err = c.encode(conn, protoConfirm, resp.Id, dst)
 		if e.Contains(err, "i/o timeout") {

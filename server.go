@@ -17,7 +17,6 @@ import (
 	"github.com/fcavani/e"
 	"github.com/fcavani/log"
 	utilNet "github.com/fcavani/net"
-	"github.com/fcavani/rand"
 )
 
 type msgType uint16
@@ -219,21 +218,16 @@ func (a *Server) request(addr *net.UDPAddr, to string, tokey *rsa.PublicKey, buf
 		return
 	}
 
+	println("***", req.Id)
 	ctx, err := a.ctxs.Get(req.Id)
 	if err != nil {
-		uuid, err := rand.Uuid()
-		if err != nil {
-			log.Tag("discover", "server").Printf("Server - Protocol fail for %v with error: %v", addr, e.Trace(e.New(err)))
-			a.sendErr(addr, e.Push(err, e.New("protocol error")))
-			return
-		}
-		resp.Id = uuid
+		resp.Id = req.Id
 		resp.Ip = addr.String()
 		a.lckSeq.Lock()
 		resp.Seq = uint16(len(a.seq))
 		a.lckSeq.Unlock()
 		err = a.ctxs.Register(&context{
-			Id:   uuid,
+			Id:   req.Id,
 			Seq:  resp.Seq,
 			Addr: addr,
 		})
