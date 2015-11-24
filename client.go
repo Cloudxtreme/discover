@@ -158,6 +158,10 @@ func (c *Client) response(conn *net.UDPConn) (*Response, error) {
 		return nil, e.Push(err, e.New("error decoding response"))
 	}
 
+	if msg.Err != nil {
+		return nil, e.Forward(msg.Err)
+	}
+
 	if msg.From != c.ServerName {
 		return nil, e.New("wrong server name")
 	}
@@ -175,9 +179,6 @@ func (c *Client) response(conn *net.UDPConn) (*Response, error) {
 	err = dec.Decode(&resp)
 	if err != nil {
 		return nil, e.Push(err, e.New("error decoding response"))
-	}
-	if resp.Err != nil {
-		return nil, e.Forward(resp.Err)
 	}
 	return &resp, nil
 }

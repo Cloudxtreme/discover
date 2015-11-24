@@ -56,10 +56,10 @@ type Server struct {
 func (a *Server) sendErr(addr *net.UDPAddr, er error) {
 	respBuf := bytes.NewBuffer([]byte{})
 	enc := gob.NewEncoder(respBuf)
-	resp := &Response{
+	msg := &Msg{
 		Err: er,
 	}
-	err := enc.Encode(resp)
+	err := enc.Encode(msg)
 	if err != nil {
 		log.Tag("discover", "server").Error("Error encoding erro response:", err)
 		return

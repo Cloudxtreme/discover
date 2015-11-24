@@ -106,5 +106,4 @@ type Response struct {
 	Seq  uint16
 	Ip   string
 	Data []byte
-	Err  error
 }

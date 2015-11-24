@@ -17,10 +17,12 @@ type Msg struct {
 	To        string
 	Data      []byte
 	Signature []byte
+	Err       error
 }
 
 func NewMsg(from, to string, fromkey *rsa.PrivateKey, tokey *rsa.PublicKey, data []byte) (*Msg, error) {
 	hash := crypto.SHA256
+
 	ciphertext, err := rsa.EncryptOAEP(hash.New(), rand.Reader, tokey, data, []byte(""))
 	if err != nil {
 		return nil, e.Push(err, "can't encrypt message")
