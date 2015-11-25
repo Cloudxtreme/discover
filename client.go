@@ -61,7 +61,7 @@ func (c *Client) Discover() (*Response, error) {
 		c.Timeout = 2 * time.Minute
 	}
 	if c.Deadline <= 0 {
-		c.Deadline = 10 * time.Second
+		c.Deadline = 5 * time.Second
 	}
 	if c.Keepalive <= 0 {
 		c.Keepalive = 30 * time.Second
