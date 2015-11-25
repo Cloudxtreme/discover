@@ -218,7 +218,6 @@ func (a *Server) request(addr *net.UDPAddr, to string, tokey *rsa.PublicKey, buf
 		return
 	}
 
-	println("***", req.Id)
 	ctx, err := a.ctxs.Get(req.Id)
 	if err != nil {
 		resp.Id = req.Id
