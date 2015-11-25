@@ -27,6 +27,19 @@ const (
 	protoKeepAlive
 )
 
+func (m msgType) String() string {
+	switch m {
+	case protoConfirm:
+		return "confirm"
+	case protoKeepAlive:
+		return "keepalive"
+	case protoReq:
+		return "request"
+	default:
+		return "invalid"
+	}
+}
+
 // Server wait for a client and send some data to it.
 type Server struct {
 	Intface
@@ -139,7 +152,9 @@ func (a *Server) Do() error {
 				log.Tag("discover", "server").Print("Invalid package type from %v.", addr)
 				continue
 			}
-			switch msgType(typ) {
+			t := msgType(typ)
+			log.ProtoLevel().Tag("server", "discover").Printf("Received %v request from %v.", t, addr)
+			switch t {
 			case protoConfirm:
 				go a.confirm(addr, msg.From, pubkey, buf[binary.MaxVarintLen16:])
 			case protoReq:
@@ -155,6 +170,7 @@ func (a *Server) Do() error {
 }
 
 func (a *Server) sendResp(resp *Response, to string, tokey *rsa.PublicKey, addr *net.UDPAddr) {
+	log.ProtoLevel().Tag("server", "discover").Printf("Send response from %v to %v", a.conn.LocalAddr(), addr)
 	respBuf := bytes.NewBuffer([]byte{})
 	enc := gob.NewEncoder(respBuf)
 	err := enc.Encode(resp)

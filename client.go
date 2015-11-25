@@ -111,6 +111,8 @@ func (c *Client) getAddr() (*Response, error) {
 }
 
 func (c *Client) encode(typ msgType, val interface{}, dst *net.UDPAddr) error {
+	log.ProtoLevel().Tag("client", "discover").Printf("Send request (%v) to %v from %v.", typ, dst, c.conn.LocalAddr())
+
 	reqBuf := bytes.NewBuffer([]byte{})
 
 	buf := make([]byte, binary.MaxVarintLen16)
@@ -156,15 +158,17 @@ func (c *Client) encode(typ msgType, val interface{}, dst *net.UDPAddr) error {
 }
 
 func (c *Client) response() (*Response, error) {
+	log.ProtoLevel().Tag("client", "discover").Printf("Waiting response...")
 	buf := make([]byte, c.BufSize)
 	err := c.conn.SetDeadline(time.Now().Add(c.Deadline))
 	if err != nil {
 		return nil, e.New(err)
 	}
-	n, _, err := c.conn.ReadFromUDP(buf)
+	n, addr, err := c.conn.ReadFromUDP(buf)
 	if err != nil {
 		return nil, e.New(err)
 	}
+	log.ProtoLevel().Tag("client", "discover").Printf("Response from %v with size %v.", addr, n)
 
 	dec := gob.NewDecoder(bytes.NewReader(buf[:n]))
 	var msg Msg
