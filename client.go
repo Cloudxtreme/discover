@@ -33,6 +33,8 @@ type Client struct {
 	Timeout time.Duration
 	// Deadline is the udp io deadline
 	Deadline time.Duration
+	// Keepalive is the periode of the keepalive package
+	Keepalive time.Duration
 	// Request function returns the data that will be send to the server.
 	Request    func(dst *net.UDPAddr) (*Request, error)
 	ServerName string
@@ -42,7 +44,9 @@ type Client struct {
 	Name       string
 	PrivateKey *rsa.PrivateKey
 	// Id is the unique identification for this client
-	Id string
+	Id     string
+	stopKa chan chan struct{}
+	conn   *net.UDPConn
 }
 
 // Discover funtion discovers the server and returns the data sent by the server.
@@ -58,6 +62,9 @@ func (c *Client) Discover() (*Response, error) {
 	}
 	if c.Deadline <= 0 {
 		c.Deadline = 10 * time.Second
+	}
+	if c.Keepalive <= 0 {
+		c.Keepalive = 30 * time.Second
 	}
 	var err error
 	if c.Id == "" {
@@ -103,7 +110,7 @@ func (c *Client) getAddr() (*Response, error) {
 	return nil, e.New("no addresses capable for listen udp")
 }
 
-func (c *Client) encode(conn *net.UDPConn, typ msgType, val interface{}, dst *net.UDPAddr) error {
+func (c *Client) encode(typ msgType, val interface{}, dst *net.UDPAddr) error {
 	reqBuf := bytes.NewBuffer([]byte{})
 
 	buf := make([]byte, binary.MaxVarintLen16)
@@ -137,24 +144,24 @@ func (c *Client) encode(conn *net.UDPConn, typ msgType, val interface{}, dst *ne
 	if reqBuf.Len() > c.BufSize {
 		return e.New("value to encode is too big %v", reqBuf.Len())
 	}
-	err = conn.SetDeadline(time.Now().Add(c.Deadline))
+	err = c.conn.SetDeadline(time.Now().Add(c.Deadline))
 	if err != nil {
 		return e.New(err)
 	}
-	_, _, err = conn.WriteMsgUDP(reqBuf.Bytes(), nil, dst)
+	_, _, err = c.conn.WriteMsgUDP(reqBuf.Bytes(), nil, dst)
 	if err != nil {
 		return e.New(err)
 	}
 	return nil
 }
 
-func (c *Client) response(conn *net.UDPConn) (*Response, error) {
+func (c *Client) response() (*Response, error) {
 	buf := make([]byte, c.BufSize)
-	err := conn.SetDeadline(time.Now().Add(c.Deadline))
+	err := c.conn.SetDeadline(time.Now().Add(c.Deadline))
 	if err != nil {
 		return nil, e.New(err)
 	}
-	n, _, err := conn.ReadFromUDP(buf)
+	n, _, err := c.conn.ReadFromUDP(buf)
 	if err != nil {
 		return nil, e.New(err)
 	}
@@ -202,11 +209,10 @@ func (c *Client) client(addr string) (*Response, error) {
 	if err != nil {
 		return nil, e.Push(err, ErrCantFindInt)
 	}
-	conn, err := net.ListenUDP("udp", client)
+	c.conn, err = net.ListenUDP("udp", client)
 	if err != nil {
 		return nil, e.Push(err, ErrCantFindInt)
 	}
-	defer conn.Close()
 	var dst *net.UDPAddr
 	if c.iface.Flags&net.FlagLoopback == net.FlagLoopback {
 		ip, err := ipport(c.Interface, addr, c.Port)
@@ -218,19 +224,19 @@ func (c *Client) client(addr string) (*Response, error) {
 			return nil, e.Push(err, ErrCantFindInt)
 		}
 	} else if !c.NotMulticast && c.iface.Flags&net.FlagMulticast == net.FlagMulticast {
-		dst, err = c.multicast(conn.LocalAddr())
+		dst, err = c.multicast(c.conn.LocalAddr())
 		if err != nil {
 			return nil, e.Push(err, ErrCantFindInt)
 		}
 	} else if c.iface.Flags&net.FlagBroadcast == net.FlagBroadcast {
-		dst, err = broadcast(conn.LocalAddr(), c.Port)
+		dst, err = broadcast(c.conn.LocalAddr(), c.Port)
 		if err != nil {
 			return nil, e.Push(err, ErrCantFindInt)
 		}
 	} else {
 		return nil, e.Push(e.New("interface isn't suported: %v", c.iface.Flags), ErrCantFindInt)
 	}
-	log.Tag("discover", "client").Printf("Local ip %v.", conn.LocalAddr())
+	log.Tag("discover", "client").Printf("Local ip %v.", c.conn.LocalAddr())
 	log.Tag("discover", "client").Printf("Try to contact server in %v.", dst)
 	now := time.Now()
 	end := now.Add(c.Timeout)
@@ -241,19 +247,19 @@ func (c *Client) client(addr string) (*Response, error) {
 		}
 
 		req.Id = c.Id
-		req.Ip = conn.LocalAddr().String()
+		req.Ip = c.conn.LocalAddr().String()
 
-		err = c.encode(conn, protoReq, req, dst)
+		err = c.encode(protoReq, req, dst)
 		if e.Contains(err, "i/o timeout") {
-			log.Errorf("Error %v -> %v: %v", conn.LocalAddr(), dst, err)
+			log.Errorf("Error %v -> %v: %v", c.conn.LocalAddr(), dst, err)
 			continue
 		} else if err != nil {
 			return nil, e.Forward(err)
 		}
 
-		resp, err := c.response(conn)
+		resp, err := c.response()
 		if e.Contains(err, "i/o timeout") {
-			log.Errorf("Error %v -> %v: %v", conn.LocalAddr(), dst, err)
+			log.Errorf("Error %v -> %v: %v", c.conn.LocalAddr(), dst, err)
 			continue
 		} else if err != nil {
 			return nil, e.Forward(err)
@@ -261,17 +267,17 @@ func (c *Client) client(addr string) (*Response, error) {
 
 		c.Id = resp.Id
 
-		err = c.encode(conn, protoConfirm, resp.Id, dst)
+		err = c.encode(protoConfirm, resp.Id, dst)
 		if e.Contains(err, "i/o timeout") {
-			log.Errorf("Error %v -> %v: %v", conn.LocalAddr(), dst, err)
+			log.Errorf("Error %v -> %v: %v", c.conn.LocalAddr(), dst, err)
 			continue
 		} else if err != nil {
 			return nil, e.Forward(err)
 		}
 
-		rp, err := c.response(conn)
+		rp, err := c.response()
 		if e.Contains(err, "i/o timeout") {
-			log.Errorf("Error %v -> %v: %v", conn.LocalAddr(), dst, err)
+			log.Errorf("Error %v -> %v: %v", c.conn.LocalAddr(), dst, err)
 			continue
 		} else if err != nil {
 			return nil, e.Forward(err)
@@ -280,6 +286,21 @@ func (c *Client) client(addr string) (*Response, error) {
 		if rp.Id != resp.Id {
 			return nil, e.New("protocol fail wrong response")
 		}
+
+		go func(dst *net.UDPAddr) {
+			for {
+				select {
+				case <-time.After(c.Keepalive):
+					log.ProtoLevel().Tag("client", "discover").Printf("Send keep alive to %v", dst)
+					err := c.keepalive(dst)
+					if err != nil {
+						log.Tag("client", "discover").Errorf("Keep alive to %v failed: %v", dst, err)
+					}
+				case ch := <-c.stopKa:
+					ch <- struct{}{}
+				}
+			}
+		}(dst)
 
 		return resp, nil
 	}
@@ -337,4 +358,23 @@ func (c *Client) multicast(addr net.Addr) (*net.UDPAddr, error) {
 	} else {
 		return nil, e.New("invalid ip address")
 	}
+}
+
+func (c *Client) keepalive(dst *net.UDPAddr) error {
+	err := c.encode(protoKeepAlive, c.Id, dst)
+	if err != nil {
+		return e.Forward(err)
+	}
+	_, err = c.response()
+	if err != nil {
+		return e.Forward(err)
+	}
+	return nil
+}
+
+func (c *Client) Close() error {
+	ch := make(chan struct{})
+	c.stopKa <- ch
+	<-ch
+	return e.New(c.conn.Close())
 }
