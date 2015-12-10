@@ -299,6 +299,7 @@ func (c *Client) client(addr string) (*Response, error) {
 					err := c.keepalive(dst)
 					if err != nil {
 						log.Tag("client", "discover").Errorf("Keep alive to %v failed: %v", dst, err)
+						return
 					}
 				case ch := <-c.stopKa:
 					ch <- struct{}{}
