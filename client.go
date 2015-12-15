@@ -240,8 +240,8 @@ func (c *Client) client(addr string) (*Response, error) {
 	} else {
 		return nil, e.Push(e.New("interface isn't suported: %v", c.iface.Flags), ErrCantFindInt)
 	}
-	log.Tag("discover", "client").Printf("Local ip %v.", c.conn.LocalAddr())
-	log.Tag("discover", "client").Printf("Try to contact server in %v.", dst)
+	log.ProtoLevel().Tag("discover", "client").Printf("Local ip %v.", c.conn.LocalAddr())
+	log.ProtoLevel().Tag("discover", "client").Printf("Try to contact server in %v.", dst)
 	now := time.Now()
 	end := now.Add(c.Timeout)
 	for d := now; d.Before(end) || d.Equal(end); d = time.Now() {
