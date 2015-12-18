@@ -304,6 +304,7 @@ func (c *Client) client(addr string) (*Response, error) {
 					}
 				case ch := <-c.stopKa:
 					ch <- struct{}{}
+					return
 				}
 			}
 		}(dst)
