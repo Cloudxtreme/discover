@@ -73,6 +73,7 @@ func (c *Client) Discover() (*Response, error) {
 			return nil, e.Forward(err)
 		}
 	}
+	c.stopKa = make(chan chan struct{})
 	c.InitMCast()
 	err = c.getInt()
 	if err != nil {
