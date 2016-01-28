@@ -61,10 +61,10 @@ func (c *Client) Discover() (*Response, error) {
 		c.Timeout = 2 * time.Minute
 	}
 	if c.Deadline <= 0 {
-		c.Deadline = 5 * time.Second
+		c.Deadline = 10 * time.Second
 	}
 	if c.Keepalive <= 0 {
-		c.Keepalive = 30 * time.Second
+		c.Keepalive = 10 * time.Second
 	}
 	var err error
 	if c.Id == "" {
@@ -155,6 +155,10 @@ func (c *Client) encode(typ msgType, val interface{}, dst *net.UDPAddr) error {
 	if err != nil {
 		return e.New(err)
 	}
+	err = c.conn.SetDeadline(time.Time{})
+	if err != nil {
+		return e.New(err)
+	}
 	return nil
 }
 
@@ -170,6 +174,10 @@ func (c *Client) response() (*Response, error) {
 		return nil, e.New(err)
 	}
 	log.ProtoLevel().Tag("client", "discover").Printf("Response from %v with size %v.", addr, n)
+	err = c.conn.SetDeadline(time.Time{})
+	if err != nil {
+		return nil, e.New(err)
+	}
 
 	dec := gob.NewDecoder(bytes.NewReader(buf[:n]))
 	var msg Msg
